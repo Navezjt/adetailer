@@ -6,7 +6,7 @@ import re
 import sys
 import traceback
 from contextlib import contextmanager, suppress
-from copy import copy, deepcopy
+from copy import copy
 from functools import partial
 from pathlib import Path
 from textwrap import dedent
@@ -14,7 +14,9 @@ from typing import Any, NamedTuple
 
 import gradio as gr
 import torch
+from PIL import Image
 from rich import print
+from torchvision.transforms.functional import to_pil_image
 
 import modules
 from adetailer import (
@@ -24,7 +26,7 @@ from adetailer import (
     mediapipe_predict,
     ultralytics_predict,
 )
-from adetailer.args import ALL_ARGS, BBOX_SORTBY, ADetailerArgs
+from adetailer.args import ALL_ARGS, BBOX_SORTBY, ADetailerArgs, SkipImg2ImgOrig
 from adetailer.common import PredictOutput
 from adetailer.mask import (
     filter_by_ratio,
@@ -39,9 +41,8 @@ from controlnet_ext.restore import (
     CNHijackRestore,
     cn_allow_script_control,
 )
-from modules import images, safe, script_callbacks, scripts, shared
+from modules import images, paths, safe, script_callbacks, scripts, shared
 from modules.devices import NansException
-from modules.paths import data_path, models_path
 from modules.processing import (
     Processed,
     StableDiffusionProcessingImg2Img,
@@ -52,13 +53,13 @@ from modules.sd_samplers import all_samplers
 from modules.shared import cmd_opts, opts, state
 
 no_huggingface = getattr(cmd_opts, "ad_no_huggingface", False)
-adetailer_dir = Path(models_path, "adetailer")
+adetailer_dir = Path(paths.models_path, "adetailer")
 extra_models_dir = shared.opts.data.get("ad_extra_models_dir", "")
 model_mapping = get_models(
     adetailer_dir, extra_dir=extra_models_dir, huggingface=not no_huggingface
 )
 txt2img_submit_button = img2img_submit_button = None
-SCRIPT_DEFAULT = "dynamic_prompting,dynamic_thresholding,wildcard_recursive,wildcards,lora_block_weight"
+SCRIPT_DEFAULT = "dynamic_prompting,dynamic_thresholding,wildcard_recursive,wildcards,lora_block_weight,negpip"
 
 if (
     not adetailer_dir.exists()
@@ -101,22 +102,6 @@ def preseve_prompts(p):
     finally:
         p.all_prompts = all_pt
         p.all_negative_prompts = all_ng
-
-
-@contextmanager
-def change_skip_img2img_args(p):
-    if not hasattr(p, "_ad_skip_img2img") or not p._ad_skip_img2img:
-        yield
-    else:
-        steps = p.steps
-        sampler_name = p.sampler_name
-        try:
-            p.steps = p._ad_orig_steps
-            p.sampler_name = p._ad_orig_sampler_name
-            yield
-        finally:
-            p.steps = steps
-            p.sampler_name = sampler_name
 
 
 class AfterDetailerScript(scripts.Script):
@@ -219,10 +204,16 @@ class AfterDetailerScript(scripts.Script):
         if len(args_) >= 2 and isinstance(args_[1], bool):
             p._ad_skip_img2img = args_[1]
             if args_[1]:
-                p._ad_orig_steps = p.steps
-                p._ad_orig_sampler_name = p.sampler_name
+                p._ad_orig = SkipImg2ImgOrig(
+                    steps=p.steps,
+                    sampler_name=p.sampler_name,
+                    width=p.width,
+                    height=p.height,
+                )
                 p.steps = 1
                 p.sampler_name = "Euler"
+                p.width = 128
+                p.height = 128
         else:
             p._ad_skip_img2img = False
 
@@ -357,6 +348,9 @@ class AfterDetailerScript(scripts.Script):
         if args.ad_use_inpaint_width_height:
             width = args.ad_inpaint_width
             height = args.ad_inpaint_height
+        elif hasattr(p, "_ad_orig"):
+            width = p._ad_orig.width
+            height = p._ad_orig.height
         else:
             width = p.width
             height = p.height
@@ -366,8 +360,8 @@ class AfterDetailerScript(scripts.Script):
     def get_steps(self, p, args: ADetailerArgs) -> int:
         if args.ad_use_steps:
             return args.ad_steps
-        if hasattr(p, "_ad_orig_steps"):
-            return p._ad_orig_steps
+        if hasattr(p, "_ad_orig"):
+            return p._ad_orig.steps
         return p.steps
 
     def get_cfg_scale(self, p, args: ADetailerArgs) -> float:
@@ -376,8 +370,8 @@ class AfterDetailerScript(scripts.Script):
     def get_sampler(self, p, args: ADetailerArgs) -> str:
         if args.ad_use_sampler:
             return args.ad_sampler
-        if hasattr(p, "_ad_orig_sampler_name"):
-            return p._ad_orig_sampler_name
+        if hasattr(p, "_ad_orig"):
+            return p._ad_orig.sampler_name
         return p.sampler_name
 
     def get_override_settings(self, p, args: ADetailerArgs) -> dict[str, Any]:
@@ -410,22 +404,26 @@ class AfterDetailerScript(scripts.Script):
             p, p.all_prompts, p.all_seeds, p.all_subseeds, None, 0, 0
         )
 
-    def write_params_txt(self, p) -> None:
-        i = self.get_i(p)
-        lenp = len(p.all_prompts)
-        if i % lenp != lenp - 1:
-            return
-
-        with change_skip_img2img_args(p):
-            infotext = self.infotext(p)
-
-        params_txt = Path(data_path, "params.txt")
+    def write_params_txt(self, content: str) -> None:
+        params_txt = Path(paths.data_path, "params.txt")
         with suppress(Exception):
-            params_txt.write_text(infotext, encoding="utf-8")
+            params_txt.write_text(content, encoding="utf-8")
+
+    @staticmethod
+    def script_args_copy(script_args):
+        type_: type[list] | type[tuple] = type(script_args)
+        result = []
+        for arg in script_args:
+            try:
+                a = copy(arg)
+            except TypeError:
+                a = arg
+            result.append(a)
+        return type_(result)
 
     def script_filter(self, p, args: ADetailerArgs):
         script_runner = copy(p.scripts)
-        script_args = deepcopy(p.script_args)
+        script_args = self.script_args_copy(p.script_args)
         self.disable_controlnet_units(script_args)
 
         ad_only_seleted_scripts = opts.data.get("ad_only_seleted_scripts", True)
@@ -452,7 +450,9 @@ class AfterDetailerScript(scripts.Script):
         script_runner.alwayson_scripts = filtered_alwayson
         return script_runner, script_args
 
-    def disable_controlnet_units(self, script_args: list[Any]) -> None:
+    def disable_controlnet_units(
+        self, script_args: list[Any] | tuple[Any, ...]
+    ) -> None:
         for obj in script_args:
             if "controlnet" in obj.__class__.__name__.lower():
                 if hasattr(obj, "enabled"):
@@ -571,7 +571,9 @@ class AfterDetailerScript(scripts.Script):
 
     @staticmethod
     def ensure_rgb_image(image: Any):
-        if hasattr(image, "mode") and image.mode != "RGB":
+        if not isinstance(image, Image.Image):
+            image = to_pil_image(image)
+        if image.mode != "RGB":
             image = image.convert("RGB")
         return image
 
@@ -623,9 +625,19 @@ class AfterDetailerScript(scripts.Script):
         use_same_seed = shared.opts.data.get("ad_same_seed_for_each_tap", False)
         return seed if use_same_seed else seed + i
 
+    @staticmethod
+    def is_img2img_inpaint(p) -> bool:
+        return hasattr(p, "image_mask") and bool(p.image_mask)
+
     @rich_traceback
     def process(self, p, *args_):
         if getattr(p, "_ad_disabled", False):
+            return
+
+        if self.is_img2img_inpaint(p):
+            p._ad_disabled = True
+            msg = "[-] ADetailer: img2img inpainting detected. adetailer disabled."
+            print(msg)
             return
 
         if self.is_ad_enabled(*args_):
@@ -651,7 +663,6 @@ class AfterDetailerScript(scripts.Script):
 
         i = self.get_i(p)
 
-        pp.image = self.get_i2i_init_image(p, pp)
         i2i = self.get_i2i_p(p, args, pp.image)
         seed, subseed = self.get_seed(p)
         ad_prompts, ad_negatives = self.get_prompt(p, args)
@@ -729,8 +740,11 @@ class AfterDetailerScript(scripts.Script):
         if getattr(p, "_ad_disabled", False) or not self.is_ad_enabled(*args_):
             return
 
+        pp.image = self.get_i2i_init_image(p, pp)
+        pp.image = self.ensure_rgb_image(pp.image)
         init_image = copy(pp.image)
         arg_list = self.get_args(p, *args_)
+        params_txt_content = Path(paths.data_path, "params.txt").read_text("utf-8")
 
         if self.need_call_postprocess(p):
             dummy = Processed(p, [], p.seed, "")
@@ -756,7 +770,7 @@ class AfterDetailerScript(scripts.Script):
                     p.scripts.before_process(copy_p)
                 p.scripts.process(copy_p)
 
-        self.write_params_txt(p)
+        self.write_params_txt(params_txt_content)
 
 
 def on_after_component(component, **_kwargs):

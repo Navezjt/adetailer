@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import UserList
+from dataclasses import dataclass
 from functools import cached_property, partial
 from typing import Any, Literal, NamedTuple, Optional
 
@@ -17,8 +18,16 @@ from pydantic import (
     validator,
 )
 
-cn_model_regex = r".*(inpaint|tile|scribble|lineart|openpose).*|^None$"
-cn_module_regex = r".*(inpaint|tile|pidi|lineart|openpose).*|^None$"
+cn_model_regex = r".*(inpaint|tile|scribble|lineart|openpose|depth).*|^None$"
+cn_module_regex = r".*(inpaint|tile|pidi|lineart|openpose|depth).*|^None$"
+
+
+@dataclass
+class SkipImg2ImgOrig:
+    steps: int
+    sampler_name: str
+    width: int
+    height: int
 
 
 class Arg(NamedTuple):
