@@ -5,21 +5,28 @@ from dataclasses import dataclass
 from functools import cached_property, partial
 from typing import Any, Literal, NamedTuple, Optional
 
-import pydantic
-from pydantic import (
-    BaseModel,
-    Extra,
-    NonNegativeFloat,
-    NonNegativeInt,
-    PositiveInt,
-    confloat,
-    conint,
-    constr,
-    validator,
-)
-
-cn_model_regex = r".*(inpaint|tile|scribble|lineart|openpose|depth).*|^None$"
-cn_module_regex = r".*(inpaint|tile|pidi|lineart|openpose|depth).*|^None$"
+try:
+    from pydantic.v1 import (
+        BaseModel,
+        Extra,
+        NonNegativeFloat,
+        NonNegativeInt,
+        PositiveInt,
+        confloat,
+        conint,
+        validator,
+    )
+except ImportError:
+    from pydantic import (
+        BaseModel,
+        Extra,
+        NonNegativeFloat,
+        NonNegativeInt,
+        PositiveInt,
+        confloat,
+        conint,
+        validator,
+    )
 
 
 @dataclass
@@ -37,16 +44,17 @@ class Arg(NamedTuple):
 
 class ArgsList(UserList):
     @cached_property
-    def attrs(self) -> tuple[str]:
+    def attrs(self) -> tuple[str, ...]:
         return tuple(attr for attr, _ in self)
 
     @cached_property
-    def names(self) -> tuple[str]:
+    def names(self) -> tuple[str, ...]:
         return tuple(name for _, name in self)
 
 
 class ADetailerArgs(BaseModel, extra=Extra.forbid):
     ad_model: str = "None"
+    ad_model_classes: str = ""
     ad_prompt: str = ""
     ad_negative_prompt: str = ""
     ad_confidence: confloat(ge=0.0, le=1.0) = 0.3
@@ -79,8 +87,8 @@ class ADetailerArgs(BaseModel, extra=Extra.forbid):
     ad_use_clip_skip: bool = False
     ad_clip_skip: conint(ge=1, le=12) = 1
     ad_restore_face: bool = False
-    ad_controlnet_model: constr(regex=cn_model_regex) = "None"
-    ad_controlnet_module: constr(regex=cn_module_regex) = "None"
+    ad_controlnet_model: str = "None"
+    ad_controlnet_module: str = "None"
     ad_controlnet_weight: confloat(ge=0.0, le=1.0) = 1.0
     ad_controlnet_guidance_start: confloat(ge=0.0, le=1.0) = 0.0
     ad_controlnet_guidance_end: confloat(ge=0.0, le=1.0) = 1.0
@@ -116,6 +124,7 @@ class ADetailerArgs(BaseModel, extra=Extra.forbid):
         p = {name: getattr(self, attr) for attr, name in ALL_ARGS}
         ppop = partial(self.ppop, p)
 
+        ppop("ADetailer model classes")
         ppop("ADetailer prompt")
         ppop("ADetailer negative prompt")
         ppop("ADetailer mask only top k largest", cond=0)
@@ -188,6 +197,7 @@ class ADetailerArgs(BaseModel, extra=Extra.forbid):
 
 _all_args = [
     ("ad_model", "ADetailer model"),
+    ("ad_model_classes", "ADetailer model classes"),
     ("ad_prompt", "ADetailer prompt"),
     ("ad_negative_prompt", "ADetailer negative prompt"),
     ("ad_confidence", "ADetailer confidence"),

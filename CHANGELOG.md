@@ -1,5 +1,51 @@
 # Changelog
 
+## 2024-03-29
+
+- v24.3.5
+- 알 수 없는 이유로 인페인팅을 확인하는 과정에서 Txt2Img 인스턴스가 들어오는 문제에 대한 임시 해결
+
+## 2024-03-28
+
+- v24.3.4
+- 인페인트에서, 이미지 해상도가 16의 배수가 아닐 때 사이즈 불일치로 인한 opencv 에러 방지
+
+## 2024-03-25
+
+- v24.3.3
+- webui 1.6.0 미만 버전에서 create_binary_mask 함수에 대해 ImportError가 발생하는 것 수정
+
+## 2024-03-21
+
+- v24.3.2
+- UI를 거치지 않은 입력에 대해, image_mask를 입력했을 때 opencv 에러가 발생하는 것 수정
+- img2img inpaint에서 skip img2img 옵션을 활성화할 경우, adetailer를 비활성화함
+  - 마스크 크기에 대해 해결하기 힘든 문제가 있음
+
+## 2024-03-16
+
+- v24.3.1
+- YOLO World v2, YOLO9 지원가능한 버전으로 ultralytics 업데이트
+- inpaint full res인 경우 인페인트 모드에서 동작하게 변경
+- inpaint full res가 아닌 경우, 사용자가 입력한 마스크와 교차점이 있는 마스크만 선택하여 사용함
+
+## 2024-03-01
+
+- v24.3.0
+- YOLO World 모델 추가: 가장 큰 yolov8x-world.pt 모델만 기본적으로 선택할 수 있게 함.
+- lllyasviel/stable-diffusion-webui-forge에서 컨트롤넷을 사용가능하게 함 (PR #517)
+- 기본 스크립트 목록에 soft_inpainting 추가 (https://github.com/AUTOMATIC1111/stable-diffusion-webui/pull/14208)
+  - 기존에 설치한 사람에게 소급적용되지는 않음
+
+- 감지모델에 대한 간단한 pytest 추가함
+- xyz grid 컨트롤넷 모델 옵션에 `Passthrough` 추가함
+
+## 2024-01-23
+
+- v24.1.2
+- controlnet 모델에 `Passthrough` 옵션 추가. 입력으로 들어온 컨트롤넷 옵션을 그대로 사용
+- fastapi 엔드포인트 추가
+
 ## 2024-01-10
 
 - v24.1.1

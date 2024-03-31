@@ -3,13 +3,14 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Optional
 
 from huggingface_hub import hf_hub_download
 from PIL import Image, ImageDraw
 from rich import print
+from torchvision.transforms.functional import to_pil_image
 
-repo_id = "Bingsu/adetailer"
+REPO_ID = "Bingsu/adetailer"
 _download_failed = False
 
 
@@ -20,7 +21,7 @@ class PredictOutput:
     preview: Optional[Image.Image] = None
 
 
-def hf_download(file: str):
+def hf_download(file: str, repo_id: str = REPO_ID) -> str | None:
     global _download_failed
 
     if _download_failed:
@@ -44,7 +45,7 @@ def scan_model_dir(path_: str | Path) -> list[Path]:
 
 def get_models(
     model_dir: str | Path, extra_dir: str | Path = "", huggingface: bool = True
-) -> OrderedDict[str, str | None]:
+) -> OrderedDict[str, str]:
     model_paths = [*scan_model_dir(model_dir), *scan_model_dir(extra_dir)]
 
     models = OrderedDict()
@@ -56,14 +57,17 @@ def get_models(
                 "hand_yolov8n.pt": hf_download("hand_yolov8n.pt"),
                 "person_yolov8n-seg.pt": hf_download("person_yolov8n-seg.pt"),
                 "person_yolov8s-seg.pt": hf_download("person_yolov8s-seg.pt"),
+                "yolov8x-worldv2.pt": hf_download(
+                    "yolov8x-worldv2.pt", repo_id="Bingsu/yolo-world-mirror"
+                ),
             }
         )
     models.update(
         {
-            "mediapipe_face_full": None,
-            "mediapipe_face_short": None,
-            "mediapipe_face_mesh": None,
-            "mediapipe_face_mesh_eyes_only": None,
+            "mediapipe_face_full": "mediapipe_face_full",
+            "mediapipe_face_short": "mediapipe_face_short",
+            "mediapipe_face_mesh": "mediapipe_face_mesh",
+            "mediapipe_face_mesh_eyes_only": "mediapipe_face_mesh_eyes_only",
         }
     )
 
@@ -130,3 +134,11 @@ def create_bbox_from_mask(
         if bbox is not None:
             bboxes.append(list(bbox))
     return bboxes
+
+
+def ensure_pil_image(image: Any, mode: str = "RGB") -> Image.Image:
+    if not isinstance(image, Image.Image):
+        image = to_pil_image(image)
+    if image.mode != mode:
+        image = image.convert(mode)
+    return image
