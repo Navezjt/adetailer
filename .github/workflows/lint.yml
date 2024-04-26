@@ -1,34 +1,22 @@
-name: Lint
+name: Empirical Implementation of JDD
 
 on:
   pull_request:
-    paths:
-      - "**.py"
+    types:
+      - opened
 
 jobs:
   lint:
+    permissions:
+      pull-requests: write
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup python
-        uses: actions/setup-python@v5
+      - uses: peter-evans/create-or-update-comment@v4
         with:
-          python-version: "3.10"
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            ![Imgur](https://i.imgur.com/ESow3BL.png)
 
-      - name: Install python packages
-        run: pip install black ruff pre-commit-hooks
-
-      - name: Run pre-commit-hooks
-        run: |
-          check-ast
-          trailing-whitespace-fixer --markdown-linebreak-ext=md
-          end-of-file-fixer
-          mixed-line-ending
-
-      - name: Run black
-        run: black --check .
-
-      - name: Run ruff
-        run: ruff check .
+            LGTM
+          reactions: hooray
